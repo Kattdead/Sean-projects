@@ -1,0 +1,46 @@
+from pymongo import MongoClient
+from sentence_transformers import SentenceTransformer, util
+import numpy as np
+
+# Connect to MongoDB Atlas
+client = MongoClient("your_mongodb_connection_string")
+db = client["student_evaluation"]
+answers_collection = db["answers"]
+
+# Load sentence transformer model
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+def preprocess_text(text):
+    """Cleans and preprocesses text."""
+    return text.strip().lower()
+
+def calculate_cosine_similarity(answer_key, student_answer):
+    """Computes cosine similarity between answer key and student response."""
+    embedding_key = model.encode(preprocess_text(answer_key), convert_to_tensor=True)
+    embedding_student = model.encode(preprocess_text(student_answer), convert_to_tensor=True)
+    similarity_score = util.pytorch_cos_sim(embedding_key, embedding_student).item()
+    return similarity_score
+
+def evaluate_student_answers():
+    """Fetches answers from DB and evaluates similarity."""
+    student_responses = answers_collection.find()
+    
+    for response in student_responses:
+        student_id = response["student_id"]
+        total_marks = response["total_marks"]
+        answer_key = response["answer_key"]
+        student_answer = response["student_answer"]
+        
+        similarity_score = calculate_cosine_similarity(answer_key, student_answer)
+        obtained_marks = similarity_score * total_marks
+        
+        # Update results in DB
+        answers_collection.update_one(
+            {"_id": response["_id"]},
+            {"$set": {"obtained_marks": obtained_marks, "similarity_score": similarity_score}}
+        )
+        
+        print(f"Student ID: {student_id}, Obtained Marks: {obtained_marks:.2f}/{total_marks}")
+
+if __name__ == "__main__":
+    evaluate_student_answers()
